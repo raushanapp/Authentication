@@ -1,10 +1,11 @@
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import Fastify from "fastify";
+import Fastify, { FastifyRequest } from "fastify";
+import type { FastifyReply } from "fastify/types/reply.js";
 import nunjucks from "nunjucks";
 import { z } from "zod";
-import { hashPassword } from "./auth.js";
+import { comparePassword, hashPassword } from "./auth.js";
 import formBody from "@fastify/formbody";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
@@ -15,10 +16,13 @@ import {
   SqliteSession,
   User,
 } from "./db.js";
+dotenv.config();
+
+// key:value
+// SESSION_ID : <id>
+const SESSION_COOKIE = "SESSION_ID";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-dotenv.config();
 
 const environment = process.env.NODE_ENV;
 const cookieScecret = process.env.COOKIE_SECRET;
@@ -42,12 +46,28 @@ const accountCreateRequestSchema = z.object({
   agreedToTerms: z.string().optional(),
 });
 
+const accountLoginRequestSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+});
+
 type AccountCreateRequest = z.infer<typeof accountCreateRequestSchema>;
+type AccountLoginRequest = z.infer<typeof accountLoginRequestSchema>;
 
 {
   fastifys.register(formBody);
   fastifys.register(cookie, { secret: cookieScecret });
   fastifys.register(staticFiles, { root: path.join(__dirname, "../../dist") });
+}
+
+function setSessionCookie(reply: FastifyReply, sessionId: string) {
+  reply.setCookie(SESSION_COOKIE, sessionId, {
+    path: "/",
+  });
+}
+
+function readSessionCookie(request: FastifyRequest): string | undefined {
+  return request.cookies[SESSION_COOKIE];
 }
 
 fastifys.get("/", async (request, reply) => {
@@ -89,12 +109,54 @@ fastifys.post("/account/signup", async (request, reply) => {
       hashedPassword, // TODO: replace with actual hashed password
     };
     const user = await userRepository.create(newUser);
+    const sessions = new SqliteSession(db);
+    const sessionId = await sessions.create(user.id);
+    setSessionCookie(reply, sessionId);
+
     console.log("Created user -->> :", user);
     return await reply.redirect("/welcome");
   } catch (error) {
     //  TODO :show error message to the user
     console.error("Error creating user -->> :", error);
     return await reply.redirect("/signup");
+  }
+});
+
+fastifys.post("/account/signin", async (request, reply) => {
+  let requestData: AccountLoginRequest;
+
+  try {
+    requestData = accountLoginRequestSchema.parse(request.body);
+  } catch (error) {
+    return await reply.redirect("/signin");
+  }
+
+  const db = await connect(USER_DB);
+  const userRepository = new SqliteUserRepository(db);
+
+  try {
+    const user = await userRepository.findByEmail(requestData.email);
+    if (user === undefined) {
+      // TODO :show error message
+
+      return await reply.redirect("/signin");
+    }
+    const passwordMatches = await comparePassword(
+      requestData.password,
+      user.hashedPassword,
+    );
+    if (!passwordMatches) {
+      // TODO :show error message
+      return await reply.redirect("/signin");
+    }
+    const sessions = new SqliteSession(db);
+    const sessionId = await sessions.create(user.id);
+    setSessionCookie(reply, sessionId); // TODO: replace with actual session ID logic
+
+    return await reply.redirect("/welcome");
+  } catch (error) {
+    // TODO :show error message to the user
+    return await reply.redirect("/signin");
   }
 });
 
