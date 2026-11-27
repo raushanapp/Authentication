@@ -1,10 +1,11 @@
-import { AsyncDatabase } from "promised-sqlite3";
+import Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
+import type { HashedPassword } from "./auth.js";
 
 export interface User {
   id: number;
   email: string;
-  hashedPassword: string;
+  hashedPassword: HashedPassword;
   agreedToTerms: boolean;
 }
 
@@ -15,67 +16,73 @@ export interface UserRepository {
 }
 
 export class SqliteUserRepository implements UserRepository {
-  constructor(private db: AsyncDatabase) {}
+  constructor(private db: Database.Database) {}
 
   async create(user: User): Promise<User> {
-    const userId: { id: number } = await this.db.get(
+    const insert = this.db.prepare(
       "INSERT INTO users(email, hashedPassword, agreedToTerms) VALUES (?, ?, ?) RETURNING id",
-      [user.email, user.hashedPassword, user.agreedToTerms],
     );
+    const result = insert.get(
+      user.email,
+      user.hashedPassword.hashed,
+      user.agreedToTerms ? 1 : 0,
+    ) as { id: number };
     return {
       ...user,
-      id: userId.id,
+      id: result.id,
     };
   }
+
   async findByEmail(email: string): Promise<User | undefined> {
-    return await this.db.get("SELECT * FROM users WHERE email = ?", email);
+    const stmt = this.db.prepare("SELECT * FROM users WHERE email = ?");
+    return (stmt.get(email) as User | undefined) ?? undefined;
   }
+
   async get(userId: number): Promise<User | undefined> {
-    return await this.db.get("SELECT * FROM users WHERE id = ?", userId);
+    const stmt = this.db.prepare("SELECT * FROM users WHERE id = ?");
+    return (stmt.get(userId) as User | undefined) ?? undefined;
   }
 }
 
 export class SqliteSession {
-  constructor(private readonly db: AsyncDatabase) {}
+  constructor(private readonly db: Database.Database) {}
+
   async create(userId: number): Promise<string> {
     const sessionId = uuidv4();
-    await this.db.run(
+    const insert = this.db.prepare(
       "INSERT INTO sessions(session_id, user_id) VALUES (?, ?)",
-      [sessionId, userId],
     );
+    insert.run(sessionId, userId);
     return sessionId;
   }
+
   async get(sessionId: string): Promise<User | undefined> {
-    const userId: { user_id: number } | undefined = await this.db.get(
-      "SELECT user_id FROM sessions WHERE session_id = ? ",
-      sessionId,
+    const stmt = this.db.prepare(
+      "SELECT user_id FROM sessions WHERE session_id = ?",
     );
-    if (userId === undefined) return undefined;
+    const result = stmt.get(sessionId) as { user_id: number } | undefined;
+    if (result === undefined) return undefined;
     const users = new SqliteUserRepository(this.db);
-    return await users.get(userId.user_id);
+    return await users.get(result.user_id);
   }
 }
 
-export async function connect(
-  connectionString: string,
-): Promise<AsyncDatabase> {
-  return await AsyncDatabase.open(connectionString);
+export function connect(connectionString: string): Database.Database {
+  return new Database(connectionString);
 }
 
-export async function newDb(db: AsyncDatabase): Promise<void> {
-  await db.exec(
-    `
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT NOT NULL UNIQUE,
-            hashedPassword TEXT NOT NULL,
-            agreedToTerms BOOLEAN NOT NULL
-        );
-         CREATE TABLE IF NOT EXISTS sessions (
-            session_id UUID PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-        );
-        `,
-  );
+export function newDb(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE,
+        hashedPassword TEXT NOT NULL,
+        agreedToTerms BOOLEAN NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+        session_id UUID PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
 }
