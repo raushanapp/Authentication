@@ -13,7 +13,7 @@
   "scripts": {
     "dev": "concurrently \"pnpm dev:tailwind\" \"pnpm dev:backend\" \"pnpm dev:frontend\" \"pnpm dev:reload\"",
     "dev:tailwind": "tailwindcss -w -i src/backend/templates/index.css -o dist/styles.css",
-    "dev:backend": "nodemon -w ./src -e ts,njk,css --exec ts-node src/backend/server.ts",
+    "dev:backend": "nodemon -w ./src -e ts,njk,css --exec tsx src/backend/server.ts",
     "dev:frontend": "nodemon -w ./src -e ts --exec parcel build src/frontend/**/*.ts",
     "dev:reload": "pnpm livereload -w 2000 -e html,css,njk,ts",
     "test": "jest",
@@ -26,6 +26,7 @@
     "@types/core-js": "^2.5.5",
     "@types/jest": "^29.5.1",
     "@types/node": "^20.1.0",
+    "@types/nunjucks": "^3.2.6",
     "@types/sqlite3": "^5.1.0",
     "@typescript-eslint/eslint-plugin": "^5.59.2",
     "@typescript-eslint/parser": "^5.59.2",
@@ -44,13 +45,21 @@
     "tailwindcss": "^3.3.2",
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.1",
-    "typescript": "^5.0.4"
+    "tsx": "^4.23.15",
+    "typescript": "^5.0.4",
+    "zod": "^4.6.7"
   },
   "engines": {
     "node": ">=18.9.1"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/formbody": "^9.0.2",
+    "@fastify/static": "^10.1.12",
     "daisyui": "^2.51.6",
+    "dotenv": "^18.0.10",
+    "fastify": "^5.12.8",
+    "nunjucks": "^3.2.4",
     "promised-sqlite3": "^2.1.0",
     "sqlite3": "^6.0.1",
     "uuid": "^14.0.3"
