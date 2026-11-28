@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import Fastify, { FastifyRequest } from "fastify";
 import type { FastifyReply } from "fastify/types/reply.js";
+import { FLASH_MSG_COOKIE, clearFlashCookie } from "./flash.js";
 import nunjucks from "nunjucks";
 import { z } from "zod";
 import { comparePassword, hashPassword } from "./auth.js";
@@ -57,7 +58,18 @@ type AccountLoginRequest = z.infer<typeof accountLoginRequestSchema>;
 {
   fastifys.register(formBody);
   fastifys.register(cookie, { secret: cookieScecret });
+  fastifys.register(clearFlashCookie);
   fastifys.register(staticFiles, { root: path.join(__dirname, "../../dist") });
+}
+
+function setFlashCookie(reply: FastifyReply, msg: string) {
+  reply.setCookie(FLASH_MSG_COOKIE, msg, {
+    path: "/",
+  });
+}
+
+function readFlashCookie(request: FastifyRequest): string | undefined {
+  return request.cookies[FLASH_MSG_COOKIE];
 }
 
 function setSessionCookie(reply: FastifyReply, sessionId: string) {
@@ -89,10 +101,12 @@ fastifys.post("/account/signup", async (request, reply) => {
   try {
     requestData = accountCreateRequestSchema.parse(request.body);
   } catch (error) {
+    setFlashCookie(reply, "There was an error processing your request.");
     return await reply.redirect("/signup");
   }
 
   if (requestData.agreedToTerms !== "on") {
+    setFlashCookie(reply, "You must agree to the terms.");
     return await reply.redirect("/signup");
   }
 
@@ -106,7 +120,7 @@ fastifys.post("/account/signup", async (request, reply) => {
       id: 0,
       email: requestData.email,
       agreedToTerms: true,
-      hashedPassword, // TODO: replace with actual hashed password
+      hashedPassword,
     };
     const user = await userRepository.create(newUser);
     const sessions = new SqliteSession(db);
@@ -116,8 +130,7 @@ fastifys.post("/account/signup", async (request, reply) => {
     console.log("Created user -->> :", user);
     return await reply.redirect("/welcome");
   } catch (error) {
-    //  TODO :show error message to the user
-    console.error("Error creating user -->> :", error);
+    setFlashCookie(reply, "That account already exists.");
     return await reply.redirect("/signup");
   }
 });
@@ -128,6 +141,7 @@ fastifys.post("/account/signin", async (request, reply) => {
   try {
     requestData = accountLoginRequestSchema.parse(request.body);
   } catch (error) {
+    setFlashCookie(reply, "There was an error processing your request.");
     return await reply.redirect("/signin");
   }
 
@@ -137,8 +151,7 @@ fastifys.post("/account/signin", async (request, reply) => {
   try {
     const user = await userRepository.findByEmail(requestData.email);
     if (user === undefined) {
-      // TODO :show error message
-
+      setFlashCookie(reply, "Invalid login credentials");
       return await reply.redirect("/signin");
     }
     const passwordMatches = await comparePassword(
@@ -146,7 +159,7 @@ fastifys.post("/account/signin", async (request, reply) => {
       user.hashedPassword,
     );
     if (!passwordMatches) {
-      // TODO :show error message
+      setFlashCookie(reply, "Invalid login credentials");
       return await reply.redirect("/signin");
     }
     const sessions = new SqliteSession(db);
@@ -155,7 +168,7 @@ fastifys.post("/account/signin", async (request, reply) => {
 
     return await reply.redirect("/welcome");
   } catch (error) {
-    // TODO :show error message to the user
+    setFlashCookie(reply, "Invalid login credentials");
     return await reply.redirect("/signin");
   }
 });
